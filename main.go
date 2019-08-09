@@ -31,13 +31,57 @@ const (
 	` + "\x00"
 )
 
-var (
-	triangle = []float32{
-		0, 0.5, 0, // top
-		-0.5, -0.5, 0, // left
-		0.5, -0.5, 0, // right
+type point [3]float32
+
+type triangle [3]point
+
+type square [2]triangle
+
+var startingTriangle = triangle{
+	point{-0.5, 0.5, 0},
+	point{-0.5, -0.5, 0},
+	point{0.5, -0.5, 0},
+}
+
+var invertedTriangle = triangle{
+	point{-0.5, 0.5, 0},
+	point{0.5, 0.5, 0},
+	point{0.5, -0.5, 0},
+}
+
+var startingSquare = square{startingTriangle, invertedTriangle}
+
+type Drawable interface {
+	flatPoints() []float32
+}
+
+func (t *triangle) flatPoints() []float32 {
+	var flatPoints []float32
+	for _, point := range t {
+		flatPoints = append(flatPoints, point[:]...)
 	}
-)
+	return flatPoints
+}
+
+func (s *square) flatPoints() []float32 {
+	return append(s[0].flatPoints(), s[1].flatPoints()...)
+}
+
+type board []float32
+
+func newBoard(shapes... Drawable) board {
+	var flatPoints []float32
+	for _, shape := range shapes {
+		flatPoints = append(flatPoints, shape.flatPoints()...)
+	}
+	return board(flatPoints)
+}
+
+func (b *board) flatPoints() []float32 {
+	return []float32(*b)
+}
+
+var startingBoard = newBoard(&startingSquare)
 
 func main() {
 	runtime.LockOSThread()
@@ -47,7 +91,7 @@ func main() {
 
 	program := initOpenGL()
 
-	vao := makeVao(triangle)
+	vao := makeVao(&startingBoard)
 
 	for !window.ShouldClose() {
 		draw(vao, window, program)
@@ -103,13 +147,14 @@ func draw(vao uint32, window *glfw.Window, program uint32) {
 	gl.UseProgram(program)
 
 	gl.BindVertexArray(vao)
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(triangle)/3))
+	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(startingBoard) / 3))
 
 	glfw.PollEvents()
 	window.SwapBuffers()
 }
 
-func makeVao(points []float32) uint32 {
+func makeVao(shape Drawable) uint32 {
+	points := shape.flatPoints()
 	var vbo uint32
 	gl.GenBuffers(1, &vbo)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
