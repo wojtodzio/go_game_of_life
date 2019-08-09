@@ -14,6 +14,12 @@ const (
 	width  = 500
 	height = 500
 
+	rows = 10
+	columns = 10
+
+	scaleX = 2.0 / rows
+	scaleY = 2.0 / columns
+
 	vertexShaderSource = `
 		#version 410
 		in vec3 vp;
@@ -37,21 +43,13 @@ type triangle [3]point
 
 type square [2]triangle
 
-var startingTriangle = triangle{
-	point{-0.5, 0.5, 0},
-	point{-0.5, -0.5, 0},
-	point{0.5, -0.5, 0},
+func newSquare(a, b, c, d point) *square {
+	t1 := triangle{a, b, c}
+	t2 := triangle{b, c, d}
+	return &square{t1, t2}
 }
 
-var invertedTriangle = triangle{
-	point{-0.5, 0.5, 0},
-	point{0.5, 0.5, 0},
-	point{0.5, -0.5, 0},
-}
-
-var startingSquare = square{startingTriangle, invertedTriangle}
-
-type Drawable interface {
+type Shape interface {
 	flatPoints() []float32
 }
 
@@ -67,21 +65,45 @@ func (s *square) flatPoints() []float32 {
 	return append(s[0].flatPoints(), s[1].flatPoints()...)
 }
 
-type board []float32
+type cell struct {
+	drawable uint32
 
-func newBoard(shapes... Drawable) board {
-	var flatPoints []float32
-	for _, shape := range shapes {
-		flatPoints = append(flatPoints, shape.flatPoints()...)
+	x int
+	y int
+}
+
+func (c *cell) draw() {
+	gl.BindVertexArray(c.drawable)
+	gl.DrawArrays(gl.TRIANGLES, 0, 6)
+}
+
+func newCell(xInt, yInt int) *cell {
+	x := float32(xInt)
+	y := float32(yInt)
+	a := point{scaleX * x - 1, scaleY * y - 1, 0}
+	b := point{scaleX * x - 1 + scaleX, scaleY * y - 1, 0}
+	c := point{scaleX * x - 1, scaleY * y - 1 + scaleY, 0}
+	d := point{scaleX * x - 1 + scaleX, scaleY * y - 1 + scaleY, 0}
+
+	return &cell{
+		drawable: makeVao(newSquare(a, b, c, d)),
+
+		x: xInt,
+		y: yInt,
 	}
-	return board(flatPoints)
 }
 
-func (b *board) flatPoints() []float32 {
-	return []float32(*b)
-}
+func makeBoard() [][]*cell  {
+	cells := make([][]*cell, rows, rows)
+	for x := 0; x < rows; x++ {
+		for y := 0; y < columns; y++ {
+			c := newCell(x, y)
+			cells[x] = append(cells[x], c)
+		}
+	}
 
-var startingBoard = newBoard(&startingSquare)
+	return cells
+}
 
 func main() {
 	runtime.LockOSThread()
@@ -91,10 +113,10 @@ func main() {
 
 	program := initOpenGL()
 
-	vao := makeVao(&startingBoard)
+	board := makeBoard()
 
 	for !window.ShouldClose() {
-		draw(vao, window, program)
+		draw(board, window, program)
 	}
 }
 
@@ -142,23 +164,26 @@ func initOpenGL() uint32 {
 	return prog
 }
 
-func draw(vao uint32, window *glfw.Window, program uint32) {
+func draw(cells [][]*cell, window *glfw.Window, program uint32) {
 	gl.Clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 	gl.UseProgram(program)
 
-	gl.BindVertexArray(vao)
-	gl.DrawArrays(gl.TRIANGLES, 0, int32(len(startingBoard) / 3))
+	for x := range cells {
+		for _, c := range cells[x] {
+			c.draw()
+		}
+	}
 
 	glfw.PollEvents()
 	window.SwapBuffers()
 }
 
-func makeVao(shape Drawable) uint32 {
+func makeVao(shape Shape) uint32 {
 	points := shape.flatPoints()
 	var vbo uint32
 	gl.GenBuffers(1, &vbo)
 	gl.BindBuffer(gl.ARRAY_BUFFER, vbo)
-	gl.BufferData(gl.ARRAY_BUFFER, 4*len(points), gl.Ptr(points), gl.STATIC_DRAW)
+	gl.BufferData(gl.ARRAY_BUFFER, 4 * len(points), gl.Ptr(points), gl.STATIC_DRAW)
 
 	var vao uint32
 	gl.GenVertexArrays(1, &vao)
